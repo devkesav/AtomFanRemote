@@ -1,0 +1,92 @@
+[
+  {
+    "button": "POWER",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 0,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SPEED_1",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 1,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SPEED_2",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 2,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SPEED_3",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 3,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SPEED_4",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 4,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SPEED_5",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 5,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "BOOST",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 6,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "TIMER",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 7,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "LED",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 8,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  },
+  {
+    "button": "SLEEP",
+    "protocol": "NEC",
+    "address": 0,
+    "command": 9,
+    "frequency": 38000,
+    "rawTimings": [],
+    "comment": "REPLACE ME"
+  }
+]
