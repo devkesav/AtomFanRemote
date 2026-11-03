@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.atomfan.R
@@ -39,6 +41,26 @@ class CodeRepository(
         val KEY_REPEAT_COUNT = intPreferencesKey("repeat_count")
         val KEY_EXPERIMENTAL_BLE_WRITE = booleanPreferencesKey("experimental_ble_write")
         val KEY_CUSTOM_IR_CODES = stringPreferencesKey("custom_ir_codes")
+        val KEY_ELECTRICITY_TARIFF = doublePreferencesKey("electricity_tariff")
+        val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
+        val KEY_AUTOMATION_NOTIF_ENABLED = booleanPreferencesKey("automation_notif_enabled")
+        val KEY_DEFAULT_DEVICE_ID = longPreferencesKey("default_device_id")
+    }
+
+    val electricityTariffFlow: Flow<Double> = dataStore.data.map { prefs ->
+        prefs[KEY_ELECTRICITY_TARIFF] ?: 7.00
+    }
+
+    val notificationsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_NOTIFICATIONS_ENABLED] ?: true
+    }
+
+    val automationNotifEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_AUTOMATION_NOTIF_ENABLED] ?: true
+    }
+
+    val defaultDeviceIdFlow: Flow<Long?> = dataStore.data.map { prefs ->
+        prefs[KEY_DEFAULT_DEVICE_ID]
     }
 
     val transportModeFlow: Flow<TransportMode> = dataStore.data.map { prefs ->
@@ -125,6 +147,34 @@ class CodeRepository(
     suspend fun setExperimentalBleWrite(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[KEY_EXPERIMENTAL_BLE_WRITE] = enabled
+        }
+    }
+
+    suspend fun setElectricityTariff(tariff: Double) {
+        dataStore.edit { prefs ->
+            prefs[KEY_ELECTRICITY_TARIFF] = tariff
+        }
+    }
+
+    suspend fun setNotificationsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_NOTIFICATIONS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setAutomationNotifEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[KEY_AUTOMATION_NOTIF_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setDefaultDeviceId(deviceId: Long?) {
+        dataStore.edit { prefs ->
+            if (deviceId != null) {
+                prefs[KEY_DEFAULT_DEVICE_ID] = deviceId
+            } else {
+                prefs.remove(KEY_DEFAULT_DEVICE_ID)
+            }
         }
     }
 

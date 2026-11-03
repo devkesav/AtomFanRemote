@@ -14,17 +14,23 @@ import com.example.atomfan.transport.FanBleTransport
 import com.example.atomfan.ui.BleDashboardScreen
 import com.example.atomfan.ui.CodeEditorScreen
 import com.example.atomfan.ui.CodeFinderScreen
+import com.example.atomfan.ui.DeviceManagementScreen
 import com.example.atomfan.ui.Esp32LearnScreen
 import com.example.atomfan.ui.MainScreen
+import com.example.atomfan.ui.SmartDashboardScreen
 import com.example.atomfan.ui.theme.AtomFanTheme
 import com.example.atomfan.viewmodel.CodeEditorViewModel
 import com.example.atomfan.viewmodel.CodeFinderViewModel
+import com.example.atomfan.viewmodel.DeviceManagementViewModel
 import com.example.atomfan.viewmodel.MainViewModel
+import com.example.atomfan.viewmodel.SmartDashboardViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
 enum class AppDestination {
     MAIN_REMOTE,
+    SMART_DASHBOARD,
+    DEVICE_MANAGEMENT,
     BLE_DASHBOARD,
     ESP32_LEARN,
     CODE_EDITOR,
@@ -41,6 +47,29 @@ class MainActivity : ComponentActivity() {
             fanBleManager = app.fanBleManager,
             esp32BleManager = app.esp32BleManager,
             phoneIrTransport = app.phoneIrTransport
+        )
+    }
+
+    private val smartDashboardViewModel: SmartDashboardViewModel by viewModels {
+        val app = application as AtomFanApplication
+        SmartDashboardViewModel.Factory(
+            application = app,
+            repository = app.repository,
+            deviceRepository = app.deviceRepository,
+            fanBleManager = app.fanBleManager,
+            esp32BleManager = app.esp32BleManager,
+            phoneIrTransport = app.phoneIrTransport
+        )
+    }
+
+    private val deviceManagementViewModel: DeviceManagementViewModel by viewModels {
+        val app = application as AtomFanApplication
+        DeviceManagementViewModel.Factory(
+            application = app,
+            repository = app.repository,
+            deviceRepository = app.deviceRepository,
+            fanBleManager = app.fanBleManager,
+            esp32BleManager = app.esp32BleManager
         )
     }
 
@@ -75,41 +104,61 @@ class MainActivity : ComponentActivity() {
         setContent {
             AtomFanTheme {
                 val app = application as AtomFanApplication
-                var currentDestination by rememberSaveable { mutableStateOf(AppDestination.MAIN_REMOTE) }
+                var currentDestination by rememberSaveable { mutableStateOf(AppDestination.SMART_DASHBOARD) }
 
                 when (currentDestination) {
+                    AppDestination.SMART_DASHBOARD -> {
+                        SmartDashboardScreen(
+                            viewModel = smartDashboardViewModel,
+                            onNavigateToPhysicalRemote = { currentDestination = AppDestination.MAIN_REMOTE },
+                            onNavigateToDeviceManagement = { currentDestination = AppDestination.DEVICE_MANAGEMENT },
+                            onNavigateToBleDashboard = { currentDestination = AppDestination.BLE_DASHBOARD },
+                            onNavigateToEsp32Learn = { currentDestination = AppDestination.ESP32_LEARN },
+                            onNavigateToCodeEditor = { currentDestination = AppDestination.CODE_EDITOR },
+                            onNavigateToCodeFinder = { currentDestination = AppDestination.CODE_FINDER },
+                            onBack = { finish() }
+                        )
+                    }
                     AppDestination.MAIN_REMOTE -> {
                         MainScreen(
                             viewModel = mainViewModel,
+                            onNavigateToSmartDashboard = { currentDestination = AppDestination.SMART_DASHBOARD },
+                            onNavigateToDeviceManagement = { currentDestination = AppDestination.DEVICE_MANAGEMENT },
                             onNavigateToBleDashboard = { currentDestination = AppDestination.BLE_DASHBOARD },
                             onNavigateToEsp32Learn = { currentDestination = AppDestination.ESP32_LEARN },
                             onNavigateToCodeEditor = { currentDestination = AppDestination.CODE_EDITOR },
                             onNavigateToCodeFinder = { currentDestination = AppDestination.CODE_FINDER }
                         )
                     }
+                    AppDestination.DEVICE_MANAGEMENT -> {
+                        DeviceManagementScreen(
+                            viewModel = deviceManagementViewModel,
+                            onBack = { currentDestination = AppDestination.SMART_DASHBOARD }
+                        )
+                    }
                     AppDestination.BLE_DASHBOARD -> {
                         BleDashboardScreen(
                             fanBleManager = app.fanBleManager,
-                            onBack = { currentDestination = AppDestination.MAIN_REMOTE }
+                            onBack = { currentDestination = AppDestination.SMART_DASHBOARD }
                         )
                     }
                     AppDestination.ESP32_LEARN -> {
                         Esp32LearnScreen(
                             esp32BleManager = app.esp32BleManager,
                             repository = app.repository,
-                            onBack = { currentDestination = AppDestination.MAIN_REMOTE }
+                            onBack = { currentDestination = AppDestination.SMART_DASHBOARD }
                         )
                     }
                     AppDestination.CODE_EDITOR -> {
                         CodeEditorScreen(
                             viewModel = codeEditorViewModel,
-                            onBack = { currentDestination = AppDestination.MAIN_REMOTE }
+                            onBack = { currentDestination = AppDestination.SMART_DASHBOARD }
                         )
                     }
                     AppDestination.CODE_FINDER -> {
                         CodeFinderScreen(
                             viewModel = codeFinderViewModel,
-                            onBack = { currentDestination = AppDestination.MAIN_REMOTE }
+                            onBack = { currentDestination = AppDestination.SMART_DASHBOARD }
                         )
                     }
                 }

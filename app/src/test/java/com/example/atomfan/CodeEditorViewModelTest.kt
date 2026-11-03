@@ -11,6 +11,7 @@ import com.example.atomfan.transport.FanBleTransport
 import com.example.atomfan.transport.PhoneIrTransport
 import com.example.atomfan.viewmodel.CodeEditorViewModel
 import kotlinx.coroutines.Dispatchers
+import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -46,7 +47,7 @@ class CodeEditorViewModelTest {
 
         val testDataStore = PreferenceDataStoreFactory.create(
             scope = testScope,
-            produceFile = { tmpFolder.newFile("test_editor_settings.preferences_pb") }
+            produceFile = { File(tmpFolder.root, "test_editor_settings.preferences_pb") }
         )
 
         repository = CodeRepository(application, customDataStore = testDataStore)

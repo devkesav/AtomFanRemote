@@ -42,7 +42,13 @@ data class MainUiState(
     val isEsp32Connected: Boolean = false,
     val esp32DeviceName: String? = null,
     val customCodesMap: Map<RemoteButton, IrCode> = emptyMap(),
-    val availableModes: List<TransportMode> = TransportMode.entries
+    val availableModes: List<TransportMode> = TransportMode.entries,
+    val showTimerDialog: Boolean = false,
+    val showSleepDialog: Boolean = false,
+    val timerMinutes: Int = 30,
+    val sleepStartTime: String = "22:00",
+    val sleepEndTime: String = "06:00",
+    val sleepDays: Set<String> = setOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 )
 
 class MainViewModel(
@@ -202,6 +208,50 @@ class MainViewModel(
     fun setExperimentalBleWrite(enabled: Boolean) {
         viewModelScope.launch {
             repository.setExperimentalBleWrite(enabled)
+        }
+    }
+
+    fun setTimerDialogVisible(visible: Boolean) {
+        _uiState.update { it.copy(showTimerDialog = visible) }
+    }
+
+    fun setSleepDialogVisible(visible: Boolean) {
+        _uiState.update { it.copy(showSleepDialog = visible) }
+    }
+
+    fun setTimerMinutes(minutes: Int) {
+        _uiState.update { it.copy(timerMinutes = minutes) }
+    }
+
+    fun setSleepSchedule(startTime: String, endTime: String, days: Set<String>) {
+        _uiState.update { it.copy(sleepStartTime = startTime, sleepEndTime = endTime, sleepDays = days) }
+    }
+
+    fun onRemoteButtonClicked(button: RemoteButton) {
+        when (button) {
+            RemoteButton.TIMER -> {
+                sendButtonCode(button)
+                setTimerDialogVisible(true)
+            }
+            RemoteButton.SLEEP -> {
+                sendButtonCode(button)
+                setSleepDialogVisible(true)
+            }
+            RemoteButton.LED -> {
+                sendButtonCode(button)
+                _uiState.update { current ->
+                    current.copy(fanState = current.fanState.copy(led = !current.fanState.led))
+                }
+            }
+            RemoteButton.POWER -> {
+                sendButtonCode(button)
+                _uiState.update { current ->
+                    current.copy(fanState = current.fanState.copy(powerOn = !current.fanState.powerOn))
+                }
+            }
+            else -> {
+                sendButtonCode(button)
+            }
         }
     }
 

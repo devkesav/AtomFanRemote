@@ -10,6 +10,7 @@ import com.example.atomfan.model.TransportMode
 import com.example.atomfan.transport.PhoneIrTransport
 import com.example.atomfan.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
+import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -49,7 +50,7 @@ class MainViewModelTest {
 
         val testDataStore = PreferenceDataStoreFactory.create(
             scope = testScope,
-            produceFile = { tmpFolder.newFile("test_settings.preferences_pb") }
+            produceFile = { File(tmpFolder.root, "test_settings.preferences_pb") }
         )
 
         repository = CodeRepository(application, customDataStore = testDataStore)
@@ -104,5 +105,32 @@ class MainViewModelTest {
         viewModel.sendButtonCode(RemoteButton.POWER)
         advanceUntilIdle()
         assertNotNull(viewModel.uiState.value)
+    }
+
+    @Test
+    fun testTimerAndSleepDialogState() = runTest(testDispatcher) {
+        advanceUntilIdle()
+        viewModel.setTimerDialogVisible(true)
+        viewModel.setTimerMinutes(60)
+        assertEquals(true, viewModel.uiState.value.showTimerDialog)
+        assertEquals(60, viewModel.uiState.value.timerMinutes)
+
+        viewModel.setSleepDialogVisible(true)
+        viewModel.setSleepSchedule("23:00", "07:00", setOf("Mon"))
+        assertEquals(true, viewModel.uiState.value.showSleepDialog)
+        assertEquals("23:00", viewModel.uiState.value.sleepStartTime)
+        assertEquals("07:00", viewModel.uiState.value.sleepEndTime)
+        assertEquals(setOf("Mon"), viewModel.uiState.value.sleepDays)
+    }
+
+    @Test
+    fun testOnRemoteButtonClickedTimerAndSleep() = runTest(testDispatcher) {
+        advanceUntilIdle()
+        viewModel.onRemoteButtonClicked(RemoteButton.TIMER)
+        assertEquals(true, viewModel.uiState.value.showTimerDialog)
+
+        viewModel.setTimerDialogVisible(false)
+        viewModel.onRemoteButtonClicked(RemoteButton.SLEEP)
+        assertEquals(true, viewModel.uiState.value.showSleepDialog)
     }
 }

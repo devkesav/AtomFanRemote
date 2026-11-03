@@ -18,6 +18,10 @@ class PhoneIrTransport(
         repeatCount = count.coerceIn(1, 2)
     }
 
+    fun hasIrEmitter(): Boolean {
+        return irManager?.hasIrEmitter() == true
+    }
+
     override suspend fun send(code: IrCode): Result<Unit> {
         val manager = irManager
             ?: return Result.failure(IllegalStateException("IR Transmit service unavailable on this device."))
