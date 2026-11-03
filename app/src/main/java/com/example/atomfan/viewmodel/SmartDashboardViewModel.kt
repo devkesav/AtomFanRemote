@@ -1,7 +1,6 @@
 package com.example.atomfan.viewmodel
 
 import android.app.Application
-import android.bluetooth.BluetoothAdapter
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -75,11 +74,15 @@ class SmartDashboardViewModel(
     val uiState: StateFlow<SmartDashboardUiState> = _uiState.asStateFlow()
 
     private val esp32Transport = Esp32Transport(esp32BleManager)
-    private val fanBleTransport = FanBleTransport(fanBleManager) {
-        kotlinx.coroutines.runBlocking {
-            runCatching { repository.experimentalBleWriteFlow.first() }.getOrDefault(false)
+    private val fanBleTransport = FanBleTransport(
+        bleManager = fanBleManager,
+        targetMacProvider = { _uiState.value.activeDevice?.macAddress },
+        isExperimentalWriteEnabled = {
+            kotlinx.coroutines.runBlocking {
+                runCatching { repository.experimentalBleWriteFlow.first() }.getOrDefault(false)
+            }
         }
-    }
+    )
 
     init {
         observeState()
@@ -273,14 +276,8 @@ class SmartDashboardViewModel(
             deviceRepository.setActiveDevice(deviceId)
             val dev = deviceRepository.getDeviceById(deviceId)
             if (dev != null && dev.macAddress.isNotBlank()) {
-                val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-                if (bluetoothAdapter != null && BluetoothAdapter.checkBluetoothAddress(dev.macAddress)) {
-                    try {
-                        val remoteDevice = bluetoothAdapter.getRemoteDevice(dev.macAddress)
-                        fanBleManager.connect(remoteDevice)
-                    } catch (e: Exception) {
-                        // ignore
-                    }
+                if (dev.transportType == TransportMode.FAN_BLE.name) {
+                    fanBleManager.connect(dev.macAddress)
                 }
             }
         }

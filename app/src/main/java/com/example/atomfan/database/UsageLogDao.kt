@@ -19,4 +19,13 @@ interface UsageLogDao {
 
     @Query("DELETE FROM usage_logs WHERE deviceId = :deviceId")
     suspend fun clearLogsForDevice(deviceId: Long)
+
+    @Query("SELECT * FROM usage_logs WHERE timestamp >= :fromTs ORDER BY timestamp DESC")
+    fun getLogsSince(fromTs: Long): Flow<List<UsageLog>>
+
+    @Query("SELECT * FROM usage_logs WHERE timestamp >= :fromTs AND timestamp <= :toTs ORDER BY timestamp DESC")
+    suspend fun getLogsInRange(fromTs: Long, toTs: Long): List<UsageLog>
+
+    @Query("DELETE FROM usage_logs")
+    suspend fun clearAllLogs()
 }

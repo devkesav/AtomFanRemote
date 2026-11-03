@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.atomfan.ble.Esp32BleManager
 import com.example.atomfan.ble.FanBleManager
 import com.example.atomfan.data.CodeRepository
+import com.example.atomfan.data.DeviceRepository
 import com.example.atomfan.model.FanState
 import com.example.atomfan.model.IrCode
 import com.example.atomfan.model.RemoteButton
@@ -56,12 +57,15 @@ class MainViewModel(
     private val repository: CodeRepository,
     private val fanBleManager: FanBleManager,
     private val esp32BleManager: Esp32BleManager,
-    private val phoneIrTransport: PhoneIrTransport
+    private val phoneIrTransport: PhoneIrTransport,
+    private val deviceRepository: DeviceRepository? = null
 ) : AndroidViewModel(application) {
 
-    private val fanBleTransport = FanBleTransport(fanBleManager) {
-        _uiState.value.isExperimentalBleWrite
-    }
+    private val fanBleTransport = FanBleTransport(
+        bleManager = fanBleManager,
+        targetMacProvider = { fanBleManager.targetMac.value },
+        isExperimentalWriteEnabled = { _uiState.value.isExperimentalBleWrite }
+    )
     private val esp32Transport = Esp32Transport(esp32BleManager)
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -342,7 +346,8 @@ class MainViewModel(
         private val repository: CodeRepository,
         private val fanBleManager: FanBleManager,
         private val esp32BleManager: Esp32BleManager,
-        private val phoneIrTransport: PhoneIrTransport
+        private val phoneIrTransport: PhoneIrTransport,
+        private val deviceRepository: DeviceRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -352,7 +357,8 @@ class MainViewModel(
                     repository,
                     fanBleManager,
                     esp32BleManager,
-                    phoneIrTransport
+                    phoneIrTransport,
+                    deviceRepository
                 ) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

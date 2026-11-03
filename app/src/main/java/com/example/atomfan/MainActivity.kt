@@ -46,7 +46,8 @@ class MainActivity : ComponentActivity() {
             repository = app.repository,
             fanBleManager = app.fanBleManager,
             esp32BleManager = app.esp32BleManager,
-            phoneIrTransport = app.phoneIrTransport
+            phoneIrTransport = app.phoneIrTransport,
+            deviceRepository = app.deviceRepository
         )
     }
 

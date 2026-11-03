@@ -45,6 +45,9 @@ class CodeRepository(
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val KEY_AUTOMATION_NOTIF_ENABLED = booleanPreferencesKey("automation_notif_enabled")
         val KEY_DEFAULT_DEVICE_ID = longPreferencesKey("default_device_id")
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        val KEY_SLEEP_DURATION_MINUTES = intPreferencesKey("sleep_duration_minutes")
+        val KEY_AUTO_SHUTDOWN_MINUTES = intPreferencesKey("auto_shutdown_minutes")
     }
 
     val electricityTariffFlow: Flow<Double> = dataStore.data.map { prefs ->
@@ -74,6 +77,18 @@ class CodeRepository(
 
     val experimentalBleWriteFlow: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[KEY_EXPERIMENTAL_BLE_WRITE] ?: false
+    }
+
+    val themeModeFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_THEME_MODE] ?: "SYSTEM"
+    }
+
+    val sleepDurationMinutesFlow: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_SLEEP_DURATION_MINUTES] ?: 480
+    }
+
+    val autoShutdownMinutesFlow: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_AUTO_SHUTDOWN_MINUTES] ?: 0
     }
 
     val irCodesFlow: Flow<Map<RemoteButton, IrCode>> = dataStore.data.map { prefs ->
@@ -175,6 +190,24 @@ class CodeRepository(
             } else {
                 prefs.remove(KEY_DEFAULT_DEVICE_ID)
             }
+        }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_THEME_MODE] = mode
+        }
+    }
+
+    suspend fun setSleepDurationMinutes(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_SLEEP_DURATION_MINUTES] = minutes
+        }
+    }
+
+    suspend fun setAutoShutdownMinutes(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_AUTO_SHUTDOWN_MINUTES] = minutes
         }
     }
 

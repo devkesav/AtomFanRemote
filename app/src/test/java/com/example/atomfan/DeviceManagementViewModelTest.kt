@@ -7,6 +7,7 @@ import com.example.atomfan.ble.FanBleManager
 import com.example.atomfan.data.CodeRepository
 import com.example.atomfan.data.DeviceRepository
 import com.example.atomfan.database.FanDevice
+import com.example.atomfan.model.BleConnectionState
 import com.example.atomfan.model.TransportMode
 import com.example.atomfan.viewmodel.DeviceManagementViewModel
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +104,7 @@ class DeviceManagementViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(1, state.pairedDevices.size)
         assertEquals("Living Room Fan", state.pairedDevices[0].name)
+        assertEquals("Living Room", state.pairedDevices[0].roomName)
         assertNotNull(state.activeDevice)
         assertEquals("AA:BB:CC:DD:EE:FF", state.activeDevice?.macAddress)
     }
@@ -136,6 +138,12 @@ class DeviceManagementViewModelTest {
         viewModel.dismissAddDialog()
         assertFalse(viewModel.uiState.value.showAddDialog)
 
+        viewModel.openAddDialog()
+        assertTrue(viewModel.uiState.value.showAddDialog)
+        assertEquals("", viewModel.uiState.value.addDialogMac)
+
+        viewModel.dismissAddDialog()
+
         val dev = FanDevice(id = 10L, name = "Test", roomName = "Room", macAddress = "00:11", transportType = "FAN_BLE")
         viewModel.openEditDialog(dev)
         assertEquals(dev, viewModel.uiState.value.editingDevice)
@@ -148,5 +156,51 @@ class DeviceManagementViewModelTest {
 
         viewModel.dismissDeleteConfirm()
         assertNull(viewModel.uiState.value.deviceToDelete)
+    }
+
+    @Test
+    fun testSwitchActiveFan() = runTest(testDispatcher) {
+        advanceUntilIdle()
+        viewModel.saveNewDevice("Fan 1", "Living Room", "AA:11", TransportMode.FAN_BLE)
+        advanceUntilIdle()
+        viewModel.saveNewDevice("Fan 2", "Bedroom", "BB:22", TransportMode.FAN_BLE)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(2, state.pairedDevices.size)
+
+        val dev1 = state.pairedDevices.first { it.macAddress == "AA:11" }
+        val dev2 = state.pairedDevices.first { it.macAddress == "BB:22" }
+
+        viewModel.switchActiveFan(dev1.id)
+        advanceUntilIdle()
+        assertEquals(dev1.id, viewModel.uiState.value.activeDevice?.id)
+
+        viewModel.switchActiveFan(dev2.id)
+        advanceUntilIdle()
+        assertEquals(dev2.id, viewModel.uiState.value.activeDevice?.id)
+    }
+
+    @Test
+    fun testRemoveDevice() = runTest(testDispatcher) {
+        advanceUntilIdle()
+        viewModel.saveNewDevice("Fan 1", "Room 1", "AA:11", TransportMode.FAN_BLE)
+        advanceUntilIdle()
+        val dev = viewModel.uiState.value.pairedDevices[0]
+
+        viewModel.openDeleteConfirm(dev)
+        viewModel.confirmDeleteDevice()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.pairedDevices.isEmpty())
+        assertNull(viewModel.uiState.value.activeDevice)
+    }
+
+    @Test
+    fun testDisconnectDevice() = runTest(testDispatcher) {
+        advanceUntilIdle()
+        viewModel.disconnectDevice()
+        advanceUntilIdle()
+        assertNotNull(viewModel.uiState.value.statusMessage)
     }
 }

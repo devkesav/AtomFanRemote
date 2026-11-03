@@ -13,6 +13,9 @@ interface FanDeviceDao {
     @Query("SELECT * FROM fan_devices ORDER BY name ASC")
     fun getAllDevices(): Flow<List<FanDevice>>
 
+    @Query("SELECT * FROM fan_devices ORDER BY id ASC")
+    suspend fun getAllDevicesList(): List<FanDevice>
+
     @Query("SELECT * FROM fan_devices WHERE id = :id")
     suspend fun getDeviceById(id: Long): FanDevice?
 

@@ -111,6 +111,23 @@ class DeviceRepositoryTest {
     }
 
     @Test
+    fun testRemoveActiveDevicePromotesNextDevice() = runTest {
+        val id1 = repository.addOrUpdateDevice(
+            FanDevice(name = "Fan 1", roomName = "Room 1", macAddress = "AA:11", transportType = "FAN_BLE", isDefault = true)
+        )
+        val id2 = repository.addOrUpdateDevice(
+            FanDevice(name = "Fan 2", roomName = "Room 2", macAddress = "BB:22", transportType = "FAN_BLE", isDefault = false)
+        )
+
+        assertEquals(id1, repository.activeDevice.first()?.id)
+
+        repository.removeDevice(id1)
+        val paired = repository.pairedDevices.first()
+        assertEquals(1, paired.size)
+        assertEquals(id2, repository.activeDevice.first()?.id)
+    }
+
+    @Test
     fun testLogUsage() = runTest {
         val id = repository.logUsage(
             deviceId = 1L,
@@ -133,6 +150,8 @@ class FakeFanDeviceDao : FanDeviceDao {
     private var nextId = 1L
 
     override fun getAllDevices(): Flow<List<FanDevice>> = devices
+
+    override suspend fun getAllDevicesList(): List<FanDevice> = devices.value
 
     override suspend fun getDeviceById(id: Long): FanDevice? {
         return devices.value.firstOrNull { it.id == id }

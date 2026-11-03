@@ -27,6 +27,14 @@ enum class TransportMode(val displayName: String) {
 }
 
 @Serializable
+enum class BleConnectionState(val displayName: String) {
+    DISCONNECTED("Disconnected"),
+    CONNECTING("Connecting"),
+    CONNECTED("Connected"),
+    RECONNECTING("Reconnecting")
+}
+
+@Serializable
 data class IrCode(
     val button: RemoteButton = RemoteButton.POWER,
     val protocol: String = "NEC",

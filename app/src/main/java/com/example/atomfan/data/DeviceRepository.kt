@@ -9,6 +9,7 @@ import com.example.atomfan.database.FanDeviceDao
 import com.example.atomfan.database.UsageLog
 import com.example.atomfan.database.UsageLogDao
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 class DeviceRepository(
     private val fanDeviceDao: FanDeviceDao,
@@ -26,9 +27,11 @@ class DeviceRepository(
         val existing = fanDeviceDao.getDeviceByMac(device.macAddress)
         return if (existing != null) {
             val updated = device.copy(
+                id = existing.id,
                 name = device.name,
                 roomName = device.roomName,
-                transportType = device.transportType
+                transportType = device.transportType,
+                isDefault = existing.isDefault
             )
             fanDeviceDao.updateDevice(updated)
             existing.id
@@ -58,12 +61,22 @@ class DeviceRepository(
     }
 
     suspend fun removeDevice(deviceId: Long) {
+        val existing = fanDeviceDao.getDeviceById(deviceId)
+        val wasActive = existing?.isDefault == true
         fanDeviceDao.deleteDeviceById(deviceId)
+        if (wasActive) {
+            val remaining = fanDeviceDao.getAllDevicesList()
+            if (remaining.isNotEmpty()) {
+                fanDeviceDao.setDefaultDevice(remaining.first().id)
+            }
+        }
     }
 
     // Usage logs
     fun getUsageLogs(deviceId: Long): Flow<List<UsageLog>> = usageLogDao.getLogsForDevice(deviceId)
     fun getAllUsageLogs(): Flow<List<UsageLog>> = usageLogDao.getAllLogs()
+    fun getLogsSince(fromTs: Long): Flow<List<UsageLog>> = usageLogDao.getLogsSince(fromTs)
+    suspend fun getLogsInRange(fromTs: Long, toTs: Long): List<UsageLog> = usageLogDao.getLogsInRange(fromTs, toTs)
 
     suspend fun logUsage(deviceId: Long, speed: Int, powerWatts: Double, mode: String, durationSeconds: Long): Long {
         val log = UsageLog(
@@ -76,10 +89,18 @@ class DeviceRepository(
         return usageLogDao.insertLog(log)
     }
 
+    suspend fun clearAllUsageLogs() = usageLogDao.clearAllLogs()
+
     // Automation rules
     fun getAutomationRules(deviceId: Long): Flow<List<AutomationRule>> = automationRuleDao.getRulesForDevice(deviceId)
+    fun getAllAutomationRules(): Flow<List<AutomationRule>> = automationRuleDao.getAllRules()
     suspend fun saveAutomationRule(rule: AutomationRule): Long = automationRuleDao.insertRule(rule)
     suspend fun deleteAutomationRule(ruleId: Long) = automationRuleDao.deleteRuleById(ruleId)
+    suspend fun updateAutomationRule(rule: AutomationRule) = automationRuleDao.updateRule(rule)
+    suspend fun toggleAutomationRule(ruleId: Long, enabled: Boolean) {
+        val rule = automationRuleDao.getAllRules().first().find { it.id == ruleId } ?: return
+        automationRuleDao.updateRule(rule.copy(isEnabled = enabled))
+    }
 
     // Comfort profiles
     fun getComfortProfiles(): Flow<List<ComfortProfile>> = comfortProfileDao.getAllProfiles()

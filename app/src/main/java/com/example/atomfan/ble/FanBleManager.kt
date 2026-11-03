@@ -16,6 +16,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
+import com.example.atomfan.model.BleConnectionState
 import com.example.atomfan.model.BleLogEntry
 import com.example.atomfan.model.FanState
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +50,7 @@ class FanBleManager(private val context: Context) {
         val FAN_SERVICE_UUID: UUID = UUID.fromString("e29ee02c-af3d-11ec-b909-0242ac120002")
         val FAN_CHAR_UUID: UUID = UUID.fromString("e29ee02c-af3d-11ec-b909-0242ac120002")
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        const val MAX_RECONNECT_ATTEMPTS = 5
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -63,6 +65,15 @@ class FanBleManager(private val context: Context) {
     private var isUserDisconnect = false
     private var reconnectAttempt = 0
     private var reconnectJob: Job? = null
+
+    private val _connectionState = MutableStateFlow(BleConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
+
+    private val _targetMac = MutableStateFlow<String?>(null)
+    val targetMac: StateFlow<String?> = _targetMac.asStateFlow()
+
+    private val _reconnectAttemptCount = MutableStateFlow(0)
+    val reconnectAttemptCount: StateFlow<Int> = _reconnectAttemptCount.asStateFlow()
 
     private val _fanState = MutableStateFlow(FanState())
     val fanState: StateFlow<FanState> = _fanState.asStateFlow()
@@ -120,19 +131,16 @@ class FanBleManager(private val context: Context) {
         }
         _scannedDevices.value = emptyList()
         _isScanning.value = true
-        log("Started scanning for Atomberg_ BLE devices...")
+        log("Started scanning for Atomberg BLE devices...")
 
-        val filters = listOf(
-            ScanFilter.Builder().setServiceUuid(ParcelUuid(FAN_SERVICE_UUID)).build()
-        )
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
         try {
-            scanner.startScan(filters, settings, scanCallback)
+            // Broad scan so Atomberg devices broadcasting local name without service UUID in the advertising packet are captured
+            scanner.startScan(emptyList(), settings, scanCallback)
         } catch (e: Exception) {
-            // Fallback to scan without filter if service UUID filter fails
             try {
                 scanner.startScan(scanCallback)
             } catch (ex: Exception) {
@@ -159,11 +167,13 @@ class FanBleManager(private val context: Context) {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val name = device.name ?: result.scanRecord?.deviceName ?: ""
-            if (name.startsWith("Atomberg_", ignoreCase = true) || hasFanService(result)) {
+            val isAtomberg = name.contains("Atomberg", ignoreCase = true) || hasFanService(result)
+
+            if (isAtomberg) {
                 _scannedDeviceRssiMap.value = _scannedDeviceRssiMap.value + (device.address to result.rssi)
                 val current = _scannedDevices.value
-                if (current.none { it.address == device.address }) {
-                    log("Found device: ${name.ifEmpty { "Unknown" }} (${device.address}) [RSSI: ${result.rssi} dBm]")
+                if (current.none { it.address.equals(device.address, ignoreCase = true) }) {
+                    log("Found Atomberg device: ${name.ifEmpty { "Unknown" }} (${device.address}) [RSSI: ${result.rssi} dBm]")
                     _scannedDevices.value = current + device
                 }
             }
@@ -180,14 +190,49 @@ class FanBleManager(private val context: Context) {
         return uuids.any { it.uuid == FAN_SERVICE_UUID }
     }
 
+    /**
+     * Connect directly by MAC address without scanning first.
+     */
+    fun connect(macAddress: String) {
+        if (macAddress.isBlank() || !BluetoothAdapter.checkBluetoothAddress(macAddress)) {
+            log("Cannot connect: Invalid MAC address format ($macAddress).", isError = true)
+            return
+        }
+        val adapter = bluetoothAdapter
+        if (adapter == null) {
+            log("Cannot connect: BluetoothAdapter is null.", isError = true)
+            return
+        }
+        val device = try {
+            adapter.getRemoteDevice(macAddress)
+        } catch (e: Exception) {
+            log("Failed to resolve BluetoothDevice for $macAddress: ${e.message}", isError = true)
+            null
+        }
+        if (device != null) {
+            connect(device)
+        }
+    }
+
     fun connect(device: BluetoothDevice) {
         stopScan()
+        reconnectJob?.cancel()
+        reconnectJob = null
+
+        // If switching from another connected device, close it first
+        if (bluetoothGatt != null && !bluetoothGatt?.device?.address.equals(device.address, ignoreCase = true)) {
+            log("Switching connection from ${bluetoothGatt?.device?.address} to ${device.address}...")
+            closeGatt()
+        }
+
         isUserDisconnect = false
         reconnectAttempt = 0
+        _reconnectAttemptCount.value = 0
         lastConnectedDevice = device
-        log("Connecting to BLE device: ${device.name ?: device.address}...")
+        _targetMac.value = device.address
+        _connectionState.value = BleConnectionState.CONNECTING
 
-        closeGatt()
+        log("Connecting to BLE device: ${device.name ?: device.address}...")
         bluetoothGatt = device.connectGatt(context, false, gattCallback)
     }
 
@@ -195,8 +240,13 @@ class FanBleManager(private val context: Context) {
         isUserDisconnect = true
         reconnectJob?.cancel()
         reconnectJob = null
+        reconnectAttempt = 0
+        _reconnectAttemptCount.value = 0
+        _targetMac.value = null
+        _connectionState.value = BleConnectionState.DISCONNECTED
+
         log("Disconnecting from device by user request...")
-        bluetoothGatt?.disconnect()
+        closeGatt()
     }
 
     private fun closeGatt() {
@@ -218,8 +268,11 @@ class FanBleManager(private val context: Context) {
             log("GATT ConnectionStateChange: status=$status, newState=$newState")
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 _isConnected.value = true
+                _connectionState.value = BleConnectionState.CONNECTED
                 _connectedDeviceName.value = gatt.device.name ?: gatt.device.address
+                _targetMac.value = gatt.device.address
                 reconnectAttempt = 0
+                _reconnectAttemptCount.value = 0
                 log("Successfully connected to ${gatt.device.address}. Discovering services...")
                 gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -231,6 +284,7 @@ class FanBleManager(private val context: Context) {
                 if (!isUserDisconnect && lastConnectedDevice != null) {
                     scheduleAutoReconnect()
                 } else {
+                    _connectionState.value = BleConnectionState.DISCONNECTED
                     closeGatt()
                 }
             }
@@ -349,14 +403,29 @@ class FanBleManager(private val context: Context) {
         gatt.readCharacteristic(char)
     }
 
-    fun writeExperimentalHexString(hexString: String) {
+    /**
+     * Sends an experimental hex payload to the connected fan.
+     *
+     * Feature 12 (Command Isolation):
+     * If [targetMacAddress] is specified, verifies that the active GATT connection
+     * matches [targetMacAddress]. If not matched, prevents transmission and returns failure.
+     */
+    fun writeExperimentalHexString(hexString: String, targetMacAddress: String? = null): Result<Unit> {
         val gatt = bluetoothGatt
         val char = targetCharacteristic
         val device = gatt?.device ?: lastConnectedDevice
 
         if (gatt == null || char == null || !_isConnected.value) {
-            log("Cannot write: BLE device not connected.", isError = true)
-            return
+            val err = "Cannot write: Fan BLE device is not connected."
+            log(err, isError = true)
+            return Result.failure(IllegalStateException(err))
+        }
+
+        // Multi-fan command isolation check
+        if (targetMacAddress != null && !device?.address.equals(targetMacAddress, ignoreCase = true)) {
+            val err = "Command rejected: Intended for fan ($targetMacAddress) but currently connected to (${device?.address})."
+            log(err, isError = true)
+            return Result.failure(IllegalStateException(err))
         }
 
         if (device != null && device.bondState == BluetoothDevice.BOND_NONE) {
@@ -366,19 +435,25 @@ class FanBleManager(private val context: Context) {
 
         val cleanHex = hexString.replace(" ", "").replace("0x", "")
         val bytes = hexToByteArray(cleanHex)
-        log("Writing experimental payload ($hexString) [${bytes.size} bytes]...")
+        log("Writing experimental payload ($hexString) to [${device?.address}] [${bytes.size} bytes]...")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val res = gatt.writeCharacteristic(char, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-            log("writeCharacteristic API 33+ status code: $res")
-        } else {
-            @Suppress("DEPRECATION")
-            char.value = bytes
-            @Suppress("DEPRECATION")
-            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            @Suppress("DEPRECATION")
-            val res = gatt.writeCharacteristic(char)
-            log("writeCharacteristic status code: $res")
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val res = gatt.writeCharacteristic(char, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                log("writeCharacteristic API 33+ status code: $res")
+            } else {
+                @Suppress("DEPRECATION")
+                char.value = bytes
+                @Suppress("DEPRECATION")
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                val res = gatt.writeCharacteristic(char)
+                log("writeCharacteristic status code: $res")
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            log("Write exception: ${e.message}", isError = true)
+            Result.failure(e)
         }
     }
 
@@ -439,15 +514,31 @@ class FanBleManager(private val context: Context) {
     }
 
     private fun scheduleAutoReconnect() {
+        if (isUserDisconnect || _targetMac.value == null) {
+            _connectionState.value = BleConnectionState.DISCONNECTED
+            return
+        }
+
+        if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+            log("Max auto-reconnect attempts ($MAX_RECONNECT_ATTEMPTS) reached. Halting auto-reconnect.", isError = true)
+            _connectionState.value = BleConnectionState.DISCONNECTED
+            closeGatt()
+            return
+        }
+
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             reconnectAttempt++
+            _reconnectAttemptCount.value = reconnectAttempt
+            _connectionState.value = BleConnectionState.RECONNECTING
+
             val backoffMs = (1000L * (1 shl (reconnectAttempt.coerceAtMost(5)))).coerceAtMost(30000L)
             log("Scheduling auto-reconnect attempt #$reconnectAttempt in ${backoffMs / 1000} seconds...")
             delay(backoffMs)
+
             val device = lastConnectedDevice
             if (device != null && !_isConnected.value && !isUserDisconnect) {
-                log("Executing auto-reconnect to ${device.address}...")
+                log("Executing auto-reconnect attempt #$reconnectAttempt to ${device.address}...")
                 bluetoothGatt = device.connectGatt(context, false, gattCallback)
             }
         }

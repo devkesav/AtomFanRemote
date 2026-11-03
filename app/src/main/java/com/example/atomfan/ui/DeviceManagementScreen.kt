@@ -31,36 +31,50 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +89,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.atomfan.database.FanDevice
+import com.example.atomfan.model.BleConnectionState
 import com.example.atomfan.model.TransportMode
 import com.example.atomfan.ui.theme.AtomFanTheme
 import com.example.atomfan.viewmodel.DeviceManagementUiState
@@ -91,15 +106,26 @@ fun DeviceManagementScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.statusMessage) {
+        val msg = uiState.statusMessage
+        if (msg != null) {
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearStatusMessage()
+        }
+    }
 
     DeviceManagementContent(
         uiState = uiState,
+        snackbarHostState = snackbarHostState,
         onBack = onBack,
         onStartScan = { viewModel.startScan() },
         onStopScan = { viewModel.stopScan() },
         onConnectDevice = { viewModel.connectDevice(it) },
         onDisconnectDevice = { viewModel.disconnectDevice() },
-        onSetActiveDevice = { viewModel.setActiveDevice(it) },
+        onSwitchActiveFan = { viewModel.switchActiveFan(it) },
+        onOpenAddDialog = { viewModel.openAddDialog() },
         onOpenAddDialogScanned = { mac, name, transport -> viewModel.openAddDialogForScanned(mac, name, transport) },
         onDismissAddDialog = { viewModel.dismissAddDialog() },
         onSaveNewDevice = { name, room, mac, transport -> viewModel.saveNewDevice(name, room, mac, transport) },
@@ -117,12 +143,14 @@ fun DeviceManagementScreen(
 @Composable
 fun DeviceManagementContent(
     uiState: DeviceManagementUiState,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onBack: () -> Unit,
     onStartScan: () -> Unit,
     onStopScan: () -> Unit,
     onConnectDevice: (FanDevice) -> Unit,
     onDisconnectDevice: () -> Unit,
-    onSetActiveDevice: (Long) -> Unit,
+    onSwitchActiveFan: (Long) -> Unit,
+    onOpenAddDialog: () -> Unit,
     onOpenAddDialogScanned: (String, String, TransportMode) -> Unit,
     onDismissAddDialog: () -> Unit,
     onSaveNewDevice: (String, String, String, TransportMode) -> Unit,
@@ -146,14 +174,22 @@ fun DeviceManagementContent(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Device Management",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Column {
+                        Text(
+                            text = "Device Management",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            text = "Manage & Switch Multiple Atomberg Fans",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -164,6 +200,12 @@ fun DeviceManagementContent(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenAddDialog) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Fan"
+                        )
+                    }
                     IconButton(onClick = {
                         if (uiState.isScanning) onStopScan() else onStartScan()
                     }) {
@@ -178,6 +220,15 @@ fun DeviceManagementContent(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onOpenAddDialog,
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text("Add Fan", fontWeight = FontWeight.SemiBold) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            )
         }
     ) { innerPadding ->
         Column(
@@ -186,38 +237,46 @@ fun DeviceManagementContent(
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Active Device Banner
+            // Active Fan Banner Card
             ActiveDeviceBannerCard(
                 activeDevice = uiState.activeDevice,
                 connectedMac = uiState.connectedDeviceMac,
+                connectionState = uiState.activeDevice?.let { uiState.deviceConnectionStates[it.macAddress] } ?: BleConnectionState.DISCONNECTED,
+                reconnectAttempts = uiState.reconnectAttemptCount,
+                onConnect = { uiState.activeDevice?.let { onConnectDevice(it) } },
                 onDisconnect = onDisconnectDevice
             )
 
-            // Paired Fans Section
-            PairedDevicesSection(
+            // Registered Fans Section
+            RegisteredFansSection(
                 pairedDevices = uiState.pairedDevices,
                 activeDeviceId = uiState.activeDevice?.id,
-                connectedMac = uiState.connectedDeviceMac,
-                onSetActive = onSetActiveDevice,
+                connectionStates = uiState.deviceConnectionStates,
+                onSwitchActive = onSwitchActiveFan,
                 onConnect = onConnectDevice,
+                onDisconnect = onDisconnectDevice,
                 onEdit = onOpenEditDialog,
-                onDelete = onOpenDeleteConfirm
+                onDelete = onOpenDeleteConfirm,
+                onAddNewFan = onOpenAddDialog
             )
 
             // Scanned Nearby Devices Section
             ScannedDevicesSection(
                 scannedDevices = uiState.scannedDevices,
                 isScanning = uiState.isScanning,
+                spinAngle = spinAngle,
                 onStartScan = onStartScan,
                 onStopScan = onStopScan,
                 onAddScanned = onOpenAddDialogScanned
             )
+
+            Spacer(modifier = Modifier.height(72.dp)) // Leave space for FAB
         }
     }
 
-    // Add Device Dialog
+    // Add Fan Dialog
     if (uiState.showAddDialog) {
         AddDeviceDialog(
             defaultMac = uiState.addDialogMac,
@@ -228,7 +287,7 @@ fun DeviceManagementContent(
         )
     }
 
-    // Edit Device Details Dialog
+    // Edit Fan Dialog
     if (uiState.editingDevice != null) {
         EditDeviceDialog(
             device = uiState.editingDevice,
@@ -239,12 +298,17 @@ fun DeviceManagementContent(
         )
     }
 
-    // Delete Confirmation Dialog
+    // Remove Confirmation Dialog
     if (uiState.deviceToDelete != null) {
         AlertDialog(
             onDismissRequest = onDismissDeleteConfirm,
-            title = { Text("Remove Device") },
-            text = { Text("Are you sure you want to remove '${uiState.deviceToDelete.name}' from saved devices?") },
+            title = { Text("Remove Registered Fan") },
+            text = {
+                Text(
+                    "Are you sure you want to remove '${uiState.deviceToDelete.name}' in '${uiState.deviceToDelete.roomName}'? " +
+                    "If this fan is currently connected, it will be disconnected."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = onConfirmDeleteDevice) {
                     Text("Remove", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
@@ -263,6 +327,9 @@ fun DeviceManagementContent(
 fun ActiveDeviceBannerCard(
     activeDevice: FanDevice?,
     connectedMac: String?,
+    connectionState: BleConnectionState,
+    reconnectAttempts: Int,
+    onConnect: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     Card(
@@ -290,44 +357,115 @@ fun ActiveDeviceBannerCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "ACTIVE FAN DEVICE",
+                        text = "ACTIVE TARGET FAN",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
 
-                val isConnected = connectedMac != null && (activeDevice == null || connectedMac.equals(activeDevice.macAddress, ignoreCase = true) || connectedMac == "ESP32_BRIDGE_CONNECTED")
+                // Connection status chip
+                val statusText = when (connectionState) {
+                    BleConnectionState.CONNECTED -> "Connected"
+                    BleConnectionState.CONNECTING -> "Connecting..."
+                    BleConnectionState.RECONNECTING -> if (reconnectAttempts > 0) "Reconnecting #$reconnectAttempts" else "Reconnecting..."
+                    BleConnectionState.DISCONNECTED -> "Disconnected"
+                }
+
+                val statusBg = when (connectionState) {
+                    BleConnectionState.CONNECTED -> Color(0xFF2E7D32)
+                    BleConnectionState.CONNECTING, BleConnectionState.RECONNECTING -> Color(0xFFE65100)
+                    BleConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.errorContainer
+                }
+
+                val statusTextColor = when (connectionState) {
+                    BleConnectionState.CONNECTED, BleConnectionState.CONNECTING, BleConnectionState.RECONNECTING -> Color.White
+                    BleConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onErrorContainer
+                }
+
                 AssistChip(
                     onClick = {},
                     label = {
                         Text(
-                            text = if (isConnected) "Connected" else "Disconnected",
+                            text = statusText,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold
                         )
                     },
                     colors = AssistChipDefaults.assistChipColors(
-                        containerColor = if (isConnected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.errorContainer,
-                        labelColor = if (isConnected) Color.White else MaterialTheme.colorScheme.onErrorContainer
+                        containerColor = statusBg,
+                        labelColor = statusTextColor
                     )
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             if (activeDevice != null) {
                 Text(
                     text = activeDevice.name,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
-                Text(
-                    text = "Room: ${activeDevice.roomName} • MAC: ${activeDevice.macAddress}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MeetingRoom,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = activeDevice.roomName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "•  MAC: ${activeDevice.macAddress}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (connectionState == BleConnectionState.CONNECTED) {
+                        OutlinedButton(
+                            onClick = onDisconnect,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Disconnect")
+                        }
+                    } else {
+                        Button(
+                            onClick = onConnect,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Icon(Icons.Default.BluetoothConnected, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Connect")
+                        }
+                    }
+                }
             } else {
                 Text(
                     text = "No Fan Device Selected",
@@ -336,7 +474,7 @@ fun ActiveDeviceBannerCard(
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "Scan nearby BLE devices or select a paired device below.",
+                    text = "Add a fan or select one of your registered fans below to start controlling it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
@@ -346,21 +484,35 @@ fun ActiveDeviceBannerCard(
 }
 
 @Composable
-fun PairedDevicesSection(
+fun RegisteredFansSection(
     pairedDevices: List<FanDevice>,
     activeDeviceId: Long?,
-    connectedMac: String?,
-    onSetActive: (Long) -> Unit,
+    connectionStates: Map<String, BleConnectionState>,
+    onSwitchActive: (Long) -> Unit,
     onConnect: (FanDevice) -> Unit,
+    onDisconnect: () -> Unit,
     onEdit: (FanDevice) -> Unit,
-    onDelete: (FanDevice) -> Unit
+    onDelete: (FanDevice) -> Unit,
+    onAddNewFan: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Saved Devices (${pairedDevices.size})",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Registered Fans (${pairedDevices.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            TextButton(onClick = onAddNewFan) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add New")
+            }
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -370,29 +522,43 @@ fun PairedDevicesSection(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
+                Column(
                     modifier = Modifier
                         .padding(24.dp)
                         .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "No saved devices yet. Scan nearby BLE devices below to pair a fan.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "No fans registered yet.",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Scan for nearby Atomberg BLE fans or add a fan manually to begin.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Button(onClick = onAddNewFan) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Add Your First Fan")
+                    }
                 }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 pairedDevices.forEach { device ->
                     val isActive = device.id == activeDeviceId
-                    PairedDeviceCardItem(
+                    val connState = connectionStates[device.macAddress] ?: BleConnectionState.DISCONNECTED
+
+                    RegisteredFanCard(
                         device = device,
                         isActive = isActive,
-                        connectedMac = connectedMac,
-                        onSetActive = { onSetActive(device.id) },
+                        connectionState = connState,
+                        onSwitchActive = { onSwitchActive(device.id) },
                         onConnect = { onConnect(device) },
+                        onDisconnect = onDisconnect,
                         onEdit = { onEdit(device) },
                         onDelete = { onDelete(device) }
                     )
@@ -403,22 +569,22 @@ fun PairedDevicesSection(
 }
 
 @Composable
-fun PairedDeviceCardItem(
+fun RegisteredFanCard(
     device: FanDevice,
     isActive: Boolean,
-    connectedMac: String?,
-    onSetActive: () -> Unit,
+    connectionState: BleConnectionState,
+    onSwitchActive: () -> Unit,
     onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isConnected = connectedMac != null && (connectedMac.equals(device.macAddress, ignoreCase = true) || (device.transportType == TransportMode.ESP32_BRIDGE.name && connectedMac == "ESP32_BRIDGE_CONNECTED"))
-
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isActive) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer
         ),
+        border = if (isActive) CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary)) else null,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -431,21 +597,42 @@ fun PairedDeviceCardItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onSetActive) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    IconButton(onClick = onSwitchActive) {
                         Icon(
                             imageVector = if (isActive) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = "Active Device",
+                            contentDescription = if (isActive) "Active Fan" else "Make Active",
                             tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
                     Column {
-                        Text(
-                            text = device.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = device.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (isActive) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "ACTIVE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.MeetingRoom,
@@ -463,11 +650,32 @@ fun PairedDeviceCardItem(
                     }
                 }
 
+                // Per-device connection status badge
+                ConnectionStatusChip(connectionState = connectionState)
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "MAC: ${device.macAddress} • Last: ${formatTime(device.lastConnected)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 AssistChip(
                     onClick = {},
                     label = {
                         Text(
-                            text = device.transportType,
+                            text = when (device.transportType) {
+                                TransportMode.FAN_BLE.name -> "BLE"
+                                TransportMode.ESP32_BRIDGE.name -> "ESP32"
+                                else -> "Phone IR"
+                            },
                             style = MaterialTheme.typography.labelSmall
                         )
                     },
@@ -482,35 +690,93 @@ fun PairedDeviceCardItem(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "MAC: ${device.macAddress} • Last Connected: ${formatTime(device.lastConnected)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Action row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onEdit) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Device Details")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onEdit) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Fan Details")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Remove Fan", tint = MaterialTheme.colorScheme.error)
+                    }
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete Device", tint = MaterialTheme.colorScheme.error)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = onConnect,
-                    enabled = !isConnected
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (isConnected) "Connected" else "Connect")
+                    if (!isActive) {
+                        OutlinedButton(onClick = onSwitchActive) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Switch to Fan")
+                        }
+                    }
+
+                    if (connectionState == BleConnectionState.CONNECTED) {
+                        OutlinedButton(onClick = onDisconnect) {
+                            Text("Disconnect")
+                        }
+                    } else {
+                        Button(
+                            onClick = onConnect,
+                            enabled = connectionState != BleConnectionState.CONNECTING && connectionState != BleConnectionState.RECONNECTING
+                        ) {
+                            if (connectionState == BleConnectionState.CONNECTING || connectionState == BleConnectionState.RECONNECTING) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Connecting")
+                            } else {
+                                Text("Connect")
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ConnectionStatusChip(connectionState: BleConnectionState) {
+    val (label, bg, textClr) = when (connectionState) {
+        BleConnectionState.CONNECTED -> Triple("Connected", Color(0xFF2E7D32), Color.White)
+        BleConnectionState.CONNECTING -> Triple("Connecting...", Color(0xFFE65100), Color.White)
+        BleConnectionState.RECONNECTING -> Triple("Reconnecting...", Color(0xFFE65100), Color.White)
+        BleConnectionState.DISCONNECTED -> Triple("Disconnected", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    Surface(
+        shape = CircleShape,
+        color = bg
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when (connectionState) {
+                BleConnectionState.CONNECTED -> {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = textClr)
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                BleConnectionState.CONNECTING, BleConnectionState.RECONNECTING -> {
+                    CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = textClr)
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                BleConnectionState.DISCONNECTED -> {}
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = textClr
+            )
         }
     }
 }
@@ -519,6 +785,7 @@ fun PairedDeviceCardItem(
 fun ScannedDevicesSection(
     scannedDevices: List<ScannedDeviceItem>,
     isScanning: Boolean,
+    spinAngle: Float,
     onStartScan: () -> Unit,
     onStopScan: () -> Unit,
     onAddScanned: (String, String, TransportMode) -> Unit
@@ -529,20 +796,33 @@ fun ScannedDevicesSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Nearby BLE Devices (${scannedDevices.size})",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Column {
+                Text(
+                    text = "Nearby BLE Devices (${scannedDevices.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Atomberg Smart Fans & ESP32 Bridges in BLE range",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             OutlinedButton(onClick = {
                 if (isScanning) onStopScan() else onStartScan()
             }) {
-                Text(if (isScanning) "Stop Scan" else "Scan Nearby")
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = if (isScanning) Modifier.rotate(spinAngle).size(16.dp) else Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (isScanning) "Stop" else "Scan Nearby")
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         if (scannedDevices.isEmpty()) {
             Surface(
@@ -557,7 +837,7 @@ fun ScannedDevicesSection(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (isScanning) "Scanning for nearby Atomberg BLE fans & ESP32 bridges..." else "Click 'Scan Nearby' to discover BLE devices.",
+                        text = if (isScanning) "Scanning nearby for Atomberg fans & ESP32 bridges..." else "No devices found. Tap 'Scan Nearby' to scan for Atomberg fans.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -566,51 +846,107 @@ fun ScannedDevicesSection(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 scannedDevices.forEach { scanned ->
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = scanned.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "${scanned.macAddress} • ${scanned.rssi} dBm",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                    ScannedDeviceCard(
+                        scanned = scanned,
+                        onAdd = { onAddScanned(scanned.macAddress, scanned.name, scanned.transportType) }
+                    )
+                }
+            }
+        }
+    }
+}
 
-                            if (scanned.isAlreadyPaired) {
-                                Text(
-                                    text = "Paired",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            } else {
-                                Button(onClick = {
-                                    onAddScanned(scanned.macAddress, scanned.name, scanned.transportType)
-                                }) {
-                                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Add Fan")
-                                }
-                            }
-                        }
+@Composable
+fun ScannedDeviceCard(
+    scanned: ScannedDeviceItem,
+    onAdd: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (scanned.transportType == TransportMode.FAN_BLE) Icons.Default.Bluetooth else Icons.Default.Router,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column {
+                    Text(
+                        text = scanned.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.SignalCellularAlt,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "${scanned.macAddress} • ${scanned.rssi} dBm",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (scanned.isAlreadyPaired) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Registered",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            } else {
+                Button(onClick = onAdd) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Fan")
                 }
             }
         }
@@ -630,13 +966,125 @@ fun AddDeviceDialog(
     var mac by remember { mutableStateOf(defaultMac) }
     var selectedTransport by remember { mutableStateOf(defaultTransport) }
 
-    val roomSuggestions = listOf("Living Room", "Master Bedroom", "Kid's Room", "Guest Room", "Office", "Dining Room")
+    val roomSuggestions = listOf("Living Room", "Master Bedroom", "Kid's Room", "Guest Room", "Office", "Dining Room", "Kitchen", "Balcony")
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add & Pair Fan Device") },
+        title = { Text("Add & Register Fan", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Custom Device Name") },
+                    placeholder = { Text("e.g. Renesa Master Bed") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = { roomName = it },
+                    label = { Text("Room Name") },
+                    placeholder = { Text("e.g. Master Bedroom") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Quick Room Selection:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    roomSuggestions.forEach { suggestion ->
+                        FilterChip(
+                            selected = roomName == suggestion,
+                            onClick = { roomName = suggestion },
+                            label = { Text(suggestion, style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = mac,
+                    onValueChange = { mac = it.uppercase() },
+                    label = { Text("MAC Address") },
+                    placeholder = { Text("AA:BB:CC:DD:EE:FF") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Connection Transport:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TransportMode.entries.forEach { mode ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedTransport = mode }
+                                .padding(vertical = 4.dp)
+                        ) {
+                            RadioButton(
+                                selected = selectedTransport == mode,
+                                onClick = { selectedTransport = mode }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(mode.displayName, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm(name, roomName, mac, selectedTransport)
+                },
+                enabled = name.isNotBlank() && roomName.isNotBlank() && (selectedTransport == TransportMode.PHONE_IR || mac.isNotBlank())
+            ) {
+                Text("Save & Connect")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditDeviceDialog(
+    device: FanDevice,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, roomName: String) -> Unit
+) {
+    var name by remember { mutableStateOf(device.name) }
+    var roomName by remember { mutableStateOf(device.roomName) }
+
+    val roomSuggestions = listOf("Living Room", "Master Bedroom", "Kid's Room", "Guest Room", "Office", "Dining Room", "Kitchen", "Balcony")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Fan Details", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -671,90 +1119,13 @@ fun AddDeviceDialog(
                         )
                     }
                 }
-
-                OutlinedTextField(
-                    value = mac,
-                    onValueChange = { mac = it },
-                    label = { Text("MAC Address") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text = "Transport Mode:",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TransportMode.entries.forEach { mode ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clickable { selectedTransport = mode }
-                                .padding(vertical = 4.dp)
-                        ) {
-                            RadioButton(
-                                selected = selectedTransport == mode,
-                                onClick = { selectedTransport = mode }
-                            )
-                            Text(mode.displayName, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
             }
         },
         confirmButton = {
-            Button(onClick = {
-                onConfirm(name, roomName, mac, selectedTransport)
-            }) {
-                Text("Save & Connect")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-fun EditDeviceDialog(
-    device: FanDevice,
-    onDismiss: () -> Unit,
-    onConfirm: (name: String, roomName: String) -> Unit
-) {
-    var name by remember { mutableStateOf(device.name) }
-    var roomName by remember { mutableStateOf(device.roomName) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit Device Details") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Device Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = roomName,
-                    onValueChange = { roomName = it },
-                    label = { Text("Room Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onConfirm(name, roomName) }) {
+            Button(
+                onClick = { onConfirm(name, roomName) },
+                enabled = name.isNotBlank() && roomName.isNotBlank()
+            ) {
                 Text("Save Changes")
             }
         },
@@ -782,6 +1153,11 @@ fun DeviceManagementPreview() {
                     FanDevice(id = 2, name = "Bedroom Fan", roomName = "Master Bedroom", macAddress = "11:22:33:44:55:66", transportType = "ESP32_BRIDGE", isDefault = false)
                 ),
                 activeDevice = FanDevice(id = 1, name = "Living Room Fan", roomName = "Living Room", macAddress = "AA:BB:CC:DD:EE:FF", transportType = "FAN_BLE", isDefault = true),
+                connectedDeviceMac = "AA:BB:CC:DD:EE:FF",
+                deviceConnectionStates = mapOf(
+                    "AA:BB:CC:DD:EE:FF" to BleConnectionState.CONNECTED,
+                    "11:22:33:44:55:66" to BleConnectionState.DISCONNECTED
+                ),
                 scannedDevices = listOf(
                     ScannedDeviceItem(name = "Atomberg_Studio", macAddress = "AA:BB:CC:11:22:33", rssi = -55, transportType = TransportMode.FAN_BLE)
                 )
@@ -791,7 +1167,8 @@ fun DeviceManagementPreview() {
             onStopScan = {},
             onConnectDevice = {},
             onDisconnectDevice = {},
-            onSetActiveDevice = {},
+            onSwitchActiveFan = {},
+            onOpenAddDialog = {},
             onOpenAddDialogScanned = { _, _, _ -> },
             onDismissAddDialog = {},
             onSaveNewDevice = { _, _, _, _ -> },

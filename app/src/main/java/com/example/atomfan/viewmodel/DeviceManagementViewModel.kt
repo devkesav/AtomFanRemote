@@ -11,6 +11,7 @@ import com.example.atomfan.ble.FanBleManager
 import com.example.atomfan.data.CodeRepository
 import com.example.atomfan.data.DeviceRepository
 import com.example.atomfan.database.FanDevice
+import com.example.atomfan.model.BleConnectionState
 import com.example.atomfan.model.TransportMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,9 @@ data class DeviceManagementUiState(
     val isScanning: Boolean = false,
     val connectedDeviceMac: String? = null,
     val isConnecting: Boolean = false,
+    val deviceConnectionStates: Map<String, BleConnectionState> = emptyMap(),
+    val activeTargetMac: String? = null,
+    val reconnectAttemptCount: Int = 0,
     val showAddDialog: Boolean = false,
     val addDialogMac: String = "",
     val addDialogDefaultName: String = "",
@@ -68,6 +72,9 @@ class DeviceManagementViewModel(
                 fanBleManager.scannedDeviceRssiMap,
                 fanBleManager.isScanning,
                 fanBleManager.isConnected,
+                fanBleManager.connectionState,
+                fanBleManager.targetMac,
+                fanBleManager.reconnectAttemptCount,
                 esp32BleManager.scannedDevices,
                 esp32BleManager.isScanning,
                 esp32BleManager.isConnected
@@ -78,9 +85,12 @@ class DeviceManagementViewModel(
                 val fanRssiMap = flows[3] as Map<String, Int>
                 val fanScanning = flows[4] as Boolean
                 val fanConn = flows[5] as Boolean
-                val espScanned = flows[6] as List<BluetoothDevice>
-                val espScanning = flows[7] as Boolean
-                val espConn = flows[8] as Boolean
+                val bleConnState = flows[6] as BleConnectionState
+                val fanTargetMac = flows[7] as String?
+                val reconnectCount = flows[8] as Int
+                val espScanned = flows[9] as List<BluetoothDevice>
+                val espScanning = flows[10] as Boolean
+                val espConn = flows[11] as Boolean
 
                 val scannedList = mutableListOf<ScannedDeviceItem>()
 
@@ -121,18 +131,39 @@ class DeviceManagementViewModel(
                     else -> null
                 }
 
-                DeviceManagementUiState(
+                // Compute per-device connection states
+                val connectionStatesMap = mutableMapOf<String, BleConnectionState>()
+                paired.forEach { dev ->
+                    val state = when {
+                        dev.transportType == TransportMode.FAN_BLE.name -> {
+                            when {
+                                fanConn && fanBleManager.connectedDevice?.address.equals(dev.macAddress, ignoreCase = true) ->
+                                    BleConnectionState.CONNECTED
+                                fanTargetMac.equals(dev.macAddress, ignoreCase = true) && bleConnState == BleConnectionState.CONNECTING ->
+                                    BleConnectionState.CONNECTING
+                                fanTargetMac.equals(dev.macAddress, ignoreCase = true) && bleConnState == BleConnectionState.RECONNECTING ->
+                                    BleConnectionState.RECONNECTING
+                                else -> BleConnectionState.DISCONNECTED
+                            }
+                        }
+                        dev.transportType == TransportMode.ESP32_BRIDGE.name -> {
+                            if (espConn) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED
+                        }
+                        else -> BleConnectionState.DISCONNECTED
+                    }
+                    connectionStatesMap[dev.macAddress] = state
+                }
+
+                _uiState.value.copy(
                     pairedDevices = paired,
                     activeDevice = active,
                     scannedDevices = scannedList,
                     isScanning = fanScanning || espScanning,
                     connectedDeviceMac = connectedMac,
-                    showAddDialog = _uiState.value.showAddDialog,
-                    addDialogMac = _uiState.value.addDialogMac,
-                    addDialogDefaultName = _uiState.value.addDialogDefaultName,
-                    addDialogTransport = _uiState.value.addDialogTransport,
-                    editingDevice = _uiState.value.editingDevice,
-                    deviceToDelete = _uiState.value.deviceToDelete
+                    isConnecting = bleConnState == BleConnectionState.CONNECTING || bleConnState == BleConnectionState.RECONNECTING,
+                    deviceConnectionStates = connectionStatesMap,
+                    activeTargetMac = fanTargetMac,
+                    reconnectAttemptCount = reconnectCount
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -158,14 +189,8 @@ class DeviceManagementViewModel(
             when (device.transportType) {
                 TransportMode.FAN_BLE.name -> {
                     repository.setTransportMode(TransportMode.FAN_BLE)
-                    val scannedDev = fanBleManager.scannedDevices.value.firstOrNull {
-                        it.address.equals(device.macAddress, ignoreCase = true)
-                    }
-                    if (scannedDev != null) {
-                        fanBleManager.connect(scannedDev)
-                    } else {
-                        fanBleManager.startScan()
-                    }
+                    fanBleManager.connect(device.macAddress)
+                    _uiState.update { it.copy(statusMessage = "Connecting to ${device.name}...") }
                 }
                 TransportMode.ESP32_BRIDGE.name -> {
                     repository.setTransportMode(TransportMode.ESP32_BRIDGE)
@@ -177,9 +202,11 @@ class DeviceManagementViewModel(
                     } else {
                         esp32BleManager.startScan()
                     }
+                    _uiState.update { it.copy(statusMessage = "Connecting to ESP32 Bridge...") }
                 }
                 else -> {
                     repository.setTransportMode(TransportMode.PHONE_IR)
+                    _uiState.update { it.copy(statusMessage = "Active Fan: ${device.name} (Phone IR)") }
                 }
             }
         }
@@ -188,15 +215,32 @@ class DeviceManagementViewModel(
     fun disconnectDevice() {
         fanBleManager.disconnect()
         esp32BleManager.disconnect()
+        _uiState.update { it.copy(statusMessage = "Disconnected from fan.") }
+    }
+
+    fun switchActiveFan(deviceId: Long) {
+        viewModelScope.launch {
+            val dev = deviceRepository.getDeviceById(deviceId)
+            if (dev != null) {
+                deviceRepository.setActiveDevice(deviceId)
+                connectDevice(dev)
+                _uiState.update { it.copy(statusMessage = "Switched to ${dev.name} (${dev.roomName})") }
+            }
+        }
     }
 
     fun setActiveDevice(deviceId: Long) {
-        viewModelScope.launch {
-            deviceRepository.setActiveDevice(deviceId)
-            val dev = deviceRepository.getDeviceById(deviceId)
-            if (dev != null) {
-                connectDevice(dev)
-            }
+        switchActiveFan(deviceId)
+    }
+
+    fun openAddDialog() {
+        _uiState.update {
+            it.copy(
+                showAddDialog = true,
+                addDialogMac = "",
+                addDialogDefaultName = "Atomberg Fan",
+                addDialogTransport = TransportMode.FAN_BLE
+            )
         }
     }
 
@@ -217,17 +261,25 @@ class DeviceManagementViewModel(
 
     fun saveNewDevice(name: String, roomName: String, mac: String, transportType: TransportMode) {
         viewModelScope.launch {
+            val trimmedName = name.trim().ifEmpty { "Atomberg Fan" }
+            val trimmedRoom = roomName.trim().ifEmpty { "Living Room" }
+            val cleanMac = mac.trim().uppercase()
+
             val newDevice = FanDevice(
-                name = name.ifEmpty { "Atomberg Fan" },
-                roomName = roomName.ifEmpty { "Living Room" },
-                macAddress = mac,
+                name = trimmedName,
+                roomName = trimmedRoom,
+                macAddress = cleanMac,
                 transportType = transportType.name,
                 isDefault = false,
                 lastConnected = System.currentTimeMillis()
             )
             val id = deviceRepository.addOrUpdateDevice(newDevice)
             dismissAddDialog()
-            setActiveDevice(id)
+            val savedDev = deviceRepository.getDeviceById(id)
+            if (savedDev != null) {
+                connectDevice(savedDev)
+            }
+            _uiState.update { it.copy(statusMessage = "Added & connected to $trimmedName") }
         }
     }
 
@@ -241,8 +293,11 @@ class DeviceManagementViewModel(
 
     fun saveDeviceDetails(deviceId: Long, name: String, roomName: String) {
         viewModelScope.launch {
-            deviceRepository.updateDeviceDetails(deviceId, name, roomName)
+            val trimmedName = name.trim().ifEmpty { "Atomberg Fan" }
+            val trimmedRoom = roomName.trim().ifEmpty { "Living Room" }
+            deviceRepository.updateDeviceDetails(deviceId, trimmedName, trimmedRoom)
             dismissEditDialog()
+            _uiState.update { it.copy(statusMessage = "Updated fan details to $trimmedName ($trimmedRoom)") }
         }
     }
 
@@ -257,9 +312,17 @@ class DeviceManagementViewModel(
     fun confirmDeleteDevice() {
         val dev = uiState.value.deviceToDelete ?: return
         viewModelScope.launch {
+            if (uiState.value.connectedDeviceMac.equals(dev.macAddress, ignoreCase = true)) {
+                disconnectDevice()
+            }
             deviceRepository.removeDevice(dev.id)
             dismissDeleteConfirm()
+            _uiState.update { it.copy(statusMessage = "Removed ${dev.name}") }
         }
+    }
+
+    fun clearStatusMessage() {
+        _uiState.update { it.copy(statusMessage = null) }
     }
 
     class Factory(
